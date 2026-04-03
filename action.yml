@@ -1,0 +1,189 @@
+name: Update Medusa
+description: Bump @medusajs/* packages, verify the build, optionally fix errors with Claude Code, and open a PR.
+branding:
+  icon: refresh-cw
+  color: blue
+
+inputs:
+  github-token:
+    description: "GitHub token with contents:write and pull-requests:write permissions"
+    required: true
+  anthropic-api-key:
+    description: "Anthropic API key to enable Claude Code for auto-fixing build errors and implementing breaking changes (optional)"
+    required: false
+    default: ""
+  base-branch:
+    description: "Base branch for the PR"
+    required: false
+    default: "main"
+  branch-prefix:
+    description: "Prefix for the update branch name"
+    required: false
+    default: "chore/update-medusa"
+  working-directory:
+    description: "Root directory of the repository"
+    required: false
+    default: "."
+  apps-directory:
+    description: "Subdirectory containing workspace apps in a monorepo (default: apps)"
+    required: false
+    default: "apps"
+  create-pr:
+    description: "Whether to commit changes and open a pull request (set to 'false' to skip PR creation, e.g. when integrating into a custom workflow)"
+    required: false
+    default: "true"
+  build-env:
+    description: "Environment variables to make available during the build step, one KEY=VALUE per line"
+    required: false
+    default: ""
+
+outputs:
+  pr-url:
+    description: "URL of the created PR (empty if packages were already up-to-date)"
+    value: ${{ steps.create-pr.outputs.PR_URL }}
+  updated-version:
+    description: "The @medusajs/* version that was applied"
+    value: ${{ steps.setup.outputs.UPDATED_VERSION }}
+  build-status:
+    description: "Build status: success, fixed-by-claude, or failed"
+    value: ${{ steps.set-build-status.outputs.STATUS }}
+
+runs:
+  using: composite
+  steps:
+    # ── Checkout & setup ────────────────────────────────────────────────────
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ inputs.github-token }}
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+
+    - name: Enable corepack (pnpm / yarn berry)
+      shell: bash
+      run: corepack enable
+
+    - name: Install action dependencies
+      shell: bash
+      run: yarn install --frozen-lockfile
+      working-directory: ${{ github.action_path }}
+
+    # ── Step 1: Detect, update, fetch release notes, build ───────────────
+    - name: Detect setup, update packages, and run build
+      id: setup
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        APPS_DIRECTORY: ${{ inputs.apps-directory }}
+      run: npx tsx ${{ github.action_path }}/src/index.ts
+
+    # ── Step 2: Build Claude prompt ──────────────────────────────────────
+    - name: Build Claude prompt
+      id: claude-prompt
+      if: |
+        steps.setup.outputs.NO_CHANGES != 'true' &&
+        inputs.anthropic-api-key != '' &&
+        (steps.setup.outputs.BUILD_EXIT_CODE != '0' || steps.setup.outputs.HAS_BREAKING_CHANGES == 'true')
+      shell: bash
+      env:
+        UPDATED_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}
+        RELEASE_NOTES_URL: ${{ steps.setup.outputs.RELEASE_NOTES_URL }}
+        BUILD_EXIT_CODE: ${{ steps.setup.outputs.BUILD_EXIT_CODE }}
+        PACKAGE_MANAGER: ${{ steps.setup.outputs.PACKAGE_MANAGER }}
+        BUILD_SCRIPT_NAME: ${{ steps.setup.outputs.BUILD_SCRIPT_NAME }}
+      run: npx tsx ${{ github.action_path }}/src/build-claude-prompt.ts
+
+    # ── Step 3: Run Claude Code ──────────────────────────────────────────
+    - name: Run Claude Code
+      id: claude
+      if: steps.claude-prompt.outcome == 'success'
+      uses: anthropics/claude-code-base-action@beta
+      with:
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        prompt: ${{ steps.claude-prompt.outputs.CLAUDE_PROMPT }}
+        allowed_tools: "Read,Write,Edit,Glob,Grep,Bash(npm run *,pnpm run *,yarn *,npx *,ls *,find *,cat *)"
+        max_turns: "10"
+
+    # ── Step 4: Re-run build after Claude ────────────────────────────────
+    - name: Re-run build after Claude
+      id: rebuild
+      if: steps.claude.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PACKAGE_MANAGER: ${{ steps.setup.outputs.PACKAGE_MANAGER }}
+        BUILD_SCRIPT_NAME: ${{ steps.setup.outputs.BUILD_SCRIPT_NAME }}
+      run: npx tsx ${{ github.action_path }}/src/build-check.ts
+
+    # ── Step 5: Determine build status ──────────────────────────────────
+    - name: Set build status
+      id: set-build-status
+      if: steps.setup.outputs.NO_CHANGES != 'true'
+      shell: bash
+      env:
+        ORIGINAL_EXIT: ${{ steps.setup.outputs.BUILD_EXIT_CODE }}
+        REBUILD_EXIT: ${{ steps.rebuild.outputs.BUILD_EXIT_CODE }}
+        CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+      run: |
+        if [ -z "$ORIGINAL_EXIT" ] || [ "$ORIGINAL_EXIT" = "0" ]; then
+          echo "STATUS=success" >> $GITHUB_OUTPUT
+          echo "CLAUDE_FIX_STATUS=skipped" >> $GITHUB_OUTPUT
+          echo "FINAL_BUILD_EXIT_CODE=0" >> $GITHUB_OUTPUT
+        elif [ "$CLAUDE_OUTCOME" = "success" ] && [ "$REBUILD_EXIT" = "0" ]; then
+          echo "STATUS=fixed-by-claude" >> $GITHUB_OUTPUT
+          echo "CLAUDE_FIX_STATUS=fixed" >> $GITHUB_OUTPUT
+          echo "FINAL_BUILD_EXIT_CODE=0" >> $GITHUB_OUTPUT
+        else
+          echo "STATUS=failed" >> $GITHUB_OUTPUT
+          echo "CLAUDE_FIX_STATUS=skipped" >> $GITHUB_OUTPUT
+          echo "FINAL_BUILD_EXIT_CODE=${ORIGINAL_EXIT:-1}" >> $GITHUB_OUTPUT
+        fi
+
+    # ── Step 6: Commit and push ──────────────────────────────────────────
+    - name: Configure git
+      if: steps.setup.outputs.NO_CHANGES != 'true' && inputs.create-pr != 'false'
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Clean up temporary files
+      if: steps.setup.outputs.NO_CHANGES != 'true' && inputs.create-pr != 'false'
+      shell: bash
+      run: rm -f build-output.txt release-notes.md
+
+    - name: Commit and push update branch
+      id: commit
+      if: steps.setup.outputs.NO_CHANGES != 'true' && inputs.create-pr != 'false'
+      shell: bash
+      env:
+        UPDATED_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}
+        BRANCH_PREFIX: ${{ inputs.branch-prefix }}
+      run: |
+        BRANCH_NAME="${BRANCH_PREFIX}-${UPDATED_VERSION}-${{ github.run_id }}"
+        git checkout -b "$BRANCH_NAME"
+        git add -A
+        git diff --staged --quiet || git commit -m "chore: update @medusajs/* to v${UPDATED_VERSION}"
+        git push origin "$BRANCH_NAME"
+        echo "UPDATE_BRANCH=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+
+    # ── Step 7: Create PR ───────────────────────────────────────────────
+    - name: Create PR
+      id: create-pr
+      if: steps.setup.outputs.NO_CHANGES != 'true' && inputs.create-pr != 'false'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
+        BRANCH_PREFIX: ${{ inputs.branch-prefix }}
+        UPDATED_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}
+        RELEASE_NOTES_URL: ${{ steps.setup.outputs.RELEASE_NOTES_URL }}
+        BUILD_EXIT_CODE: ${{ steps.set-build-status.outputs.FINAL_BUILD_EXIT_CODE }}
+        CLAUDE_FIX_STATUS: ${{ steps.set-build-status.outputs.CLAUDE_FIX_STATUS }}
+        UPDATE_BRANCH: ${{ steps.commit.outputs.UPDATE_BRANCH }}
+      run: npx tsx ${{ github.action_path }}/src/create-pr.ts

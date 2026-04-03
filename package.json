@@ -1,0 +1,23 @@
+{
+  "name": "medusa-update-action",
+  "version": "1.0.0",
+  "description": "GitHub Action to automatically update @medusajs/* packages and open a PR",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.0",
+    "npm-check-updates": "^17.1.14"
+  },
+  "devDependencies": {
+    "@types/jest": "^29",
+    "@types/node": "^24.0.0",
+    "jest": "^29",
+    "ts-jest": "^29.4.9",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
