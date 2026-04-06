@@ -174,4 +174,25 @@ describe("fetchAndSaveReleaseNotes", () => {
 
     expect(mockWriteFileSync).toHaveBeenCalledWith("/tmp/release-notes.md", "(No release notes found)", "utf-8");
   });
+
+  it("includes Authorization header when GH_TOKEN is set", async () => {
+    process.env.GH_TOKEN = "test-token";
+    mockPages([[makeRelease("2.5.0"), makeRelease("2.4.0")]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+    expect(fetchCall[1].headers["Authorization"]).toBe("Bearer test-token");
+    delete process.env.GH_TOKEN;
+  });
+
+  it("omits Authorization header when GH_TOKEN is not set", async () => {
+    delete process.env.GH_TOKEN;
+    mockPages([[makeRelease("2.5.0"), makeRelease("2.4.0")]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+    expect(fetchCall[1].headers["Authorization"]).toBeUndefined();
+  });
 });

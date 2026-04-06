@@ -20,10 +20,17 @@ async function fetchReleaseNotesSince(currentVersion: string, targetVersion: str
   let foundTarget = false;
   let foundCurrent = false;
 
+  const headers: Record<string, string> = {
+    "User-Agent": "medusa-update-action/1.0",
+    Accept: "application/vnd.github+json",
+  };
+  const token = process.env.GH_TOKEN;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   while (page <= MAX_PAGES && !foundCurrent) {
     const response = await fetch(
       `https://api.github.com/repos/medusajs/medusa/releases?per_page=10&page=${page}`,
-      { headers: { "User-Agent": "medusa-update-action/1.0", Accept: "application/vnd.github+json" } }
+      { headers }
     );
 
     if (!response.ok) {
@@ -90,7 +97,9 @@ export async function fetchAndSaveReleaseNotes(currentVersion: string, targetVer
     core.setOutput("RELEASE_NOTES_URL", releaseNotesUrl);
     core.setOutput("HAS_BREAKING_CHANGES", String(hasBreakingChanges));
   } catch (err) {
-    core.warning(`Error fetching release notes: ${err}`);
+    const cause = (err as { cause?: unknown }).cause;
+    const detail = cause ? ` (cause: ${cause})` : "";
+    core.warning(`Error fetching release notes: ${err}${detail}`);
     fs.writeFileSync(RELEASE_NOTES_FILE, "", "utf-8");
     core.setOutput("RELEASE_NOTES_URL", fallbackUrl);
     core.setOutput("HAS_BREAKING_CHANGES", "false");
