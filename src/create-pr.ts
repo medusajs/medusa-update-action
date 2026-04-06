@@ -88,8 +88,11 @@ ${truncatedOutput}
 
     releaseNotesSection = latestNotes;
     if (previousSections.length > 0) {
-      const previousContent = previousSections.join(SEPARATOR);
-      releaseNotesSection += `\n\n<details>\n<summary>${previousSections.length} previous release(s)</summary>\n\n${previousContent}\n\n</details>`;
+      // Extract only the heading line (## [vX.Y.Z](url)) from each previous section
+      const previousLinks = previousSections
+        .map((s) => s.split("\n")[0].replace(/^## /, "- "))
+        .join("\n");
+      releaseNotesSection += `\n\n<details>\n<summary>${previousSections.length} previous release(s)</summary>\n\n${previousLinks}\n\n</details>`;
     }
   }
 

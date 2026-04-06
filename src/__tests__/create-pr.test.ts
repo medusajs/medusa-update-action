@@ -68,7 +68,7 @@ describe("buildPRBody", () => {
     expect(body).not.toContain("<details>");
   });
 
-  it("shows latest release notes directly and wraps previous releases in a details block", () => {
+  it("shows latest release notes directly and wraps previous releases as links in a details block", () => {
     const multiBody = [
       "## [v2.5.0](url-2.5.0)\n\nnotes for 2.5.0",
       "## [v2.4.9](url-2.4.9)\n\nnotes for 2.4.9",
@@ -80,8 +80,11 @@ describe("buildPRBody", () => {
     expect(body).toContain("notes for 2.5.0");
     expect(body).toContain("<details>");
     expect(body).toContain("2 previous release(s)");
-    expect(body).toContain("notes for 2.4.9");
-    expect(body).toContain("notes for 2.4.8");
+    // Previous versions show as links only, not full notes
+    expect(body).toContain("[v2.4.9](url-2.4.9)");
+    expect(body).toContain("[v2.4.8](url-2.4.8)");
+    expect(body).not.toContain("notes for 2.4.9");
+    expect(body).not.toContain("notes for 2.4.8");
   });
 
   it("shows fallback when release notes body is empty", () => {
