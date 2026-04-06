@@ -21,8 +21,9 @@ function truncate(text: string, maxLength: number): string {
 function closeStaleUpdatePRs(branchPrefix: string): void {
   core.info(`Closing stale PRs with head branch matching "${branchPrefix}-*"...`);
   try {
+    const semverPattern = `${branchPrefix}-[0-9]+\\.[0-9]+\\.[0-9]+`;
     const output = execSync(
-      `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("${branchPrefix}-")) | .number'`,
+      `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("^${semverPattern}$")) | .number'`,
       { encoding: "utf-8" }
     ).trim();
 

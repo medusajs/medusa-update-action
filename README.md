@@ -199,7 +199,7 @@ jobs:
           base-branch: develop
 
           # Prefix for the update branch name (default: "chore/update-medusa")
-          # Final branch: chore/update-medusa-2.14.0-1234567890
+          # The resolved version is always appended: deps/medusa-2.14.0
           branch-prefix: deps/medusa
 
           # Root directory of the project (default: ".")
@@ -219,7 +219,7 @@ jobs:
 | Input | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `base-branch` | string | no | `main` | Base branch for the PR |
-| `branch-prefix` | string | no | `chore/update-medusa` | Branch name prefix |
+| `branch-prefix` | string | no | `chore/update-medusa` | Prefix for the update branch. The resolved version is always appended — e.g. `chore/update-medusa-2.5.0`. |
 | `working-directory` | string | no | `.` | Root directory of your project |
 | `apps-directory` | string | no | `apps` | Subdirectory containing workspace apps (monorepos only) |
 | `create-pr` | string | no | `true` | Set to `"false"` to skip committing and opening a PR |
@@ -358,6 +358,39 @@ jobs:
           title: "chore: update @medusajs/* to v${{ steps.update.outputs.updated-version }}"
           body: "Automated Medusa update to v${{ steps.update.outputs.updated-version }}."
 ```
+
+### Multiple Medusa projects in the same repo
+
+Call the action once per project, using `working-directory` to point at each one and a unique `branch-prefix` to keep their PRs and stale-PR cleanup separate:
+
+```yaml
+jobs:
+  update:
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update US backend
+        uses: medusajs/medusa-update-action@beta
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: backend-us
+          branch-prefix: chore/update-medusa-us
+
+      - name: Update EU backend
+        uses: medusajs/medusa-update-action@beta
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: backend-eu
+          branch-prefix: chore/update-medusa-eu
+```
+
+Each step opens its own PR (e.g. `chore/update-medusa-us-2.5.0`) and only closes stale PRs for its own prefix, so the two update flows remain completely independent.
 
 ## License
 
