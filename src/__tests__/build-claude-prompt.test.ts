@@ -2,6 +2,7 @@ import { buildClaudePrompt } from "../build-claude-prompt.js";
 
 const BASE_PARAMS = {
   version: "2.5.0",
+  previousVersion: "2.4.0",
   releaseNotesUrl: "https://github.com/medusajs/medusa/releases/tag/v2.5.0",
   buildExitCode: "0",
   packageManager: "yarn",
@@ -15,6 +16,20 @@ describe("buildClaudePrompt", () => {
     const prompt = buildClaudePrompt(BASE_PARAMS);
 
     expect(prompt).toContain("v2.5.0");
+  });
+
+  it("shows version range when previousVersion differs from version", () => {
+    const prompt = buildClaudePrompt(BASE_PARAMS);
+
+    expect(prompt).toContain("v2.4.0");
+    expect(prompt).toContain("v2.5.0");
+  });
+
+  it("shows only target version when previousVersion equals version", () => {
+    const prompt = buildClaudePrompt({ ...BASE_PARAMS, previousVersion: "2.5.0" });
+
+    expect(prompt).toContain("to **v2.5.0**");
+    expect(prompt).not.toContain("from **v2.5.0**");
   });
 
   it("includes the release notes URL", () => {

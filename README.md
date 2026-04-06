@@ -223,6 +223,7 @@ jobs:
 | `working-directory` | string | no | `.` | Root directory of your project |
 | `apps-directory` | string | no | `apps` | Subdirectory containing workspace apps (monorepos only) |
 | `create-pr` | string | no | `true` | Set to `"false"` to skip committing and opening a PR |
+| `target-version` | string | no | _(latest)_ | Pin to a specific `@medusajs/*` version (e.g. `2.5.0`). Must be greater than the currently installed version. Defaults to the latest available version. |
 
 ## Secrets
 
@@ -230,6 +231,8 @@ jobs:
 |---|---|---|
 | `github-token` | **yes** | A token with `contents: write` and `pull-requests: write` permissions. Pass `${{ secrets.GITHUB_TOKEN }}`. |
 | `anthropic-api-key` | no | Your [Anthropic API key](https://console.anthropic.com/). Enables Claude Code to auto-fix errors and implement breaking changes. |
+
+> **PR author:** When you pass `${{ secrets.GITHUB_TOKEN }}`, the PR and commit are authored by `github-actions[bot]`. If you pass a Personal Access Token (PAT) instead, the PR is authored as that token's user account.
 
 ## Outputs
 
@@ -291,6 +294,35 @@ jobs:
 ```
 
 The action will still detect your setup, update packages, run the build, and expose its outputs — it just won't commit or open a PR.
+
+### Update to a specific version
+
+By default, the action updates Medusa to the latest version. To let a user (or another workflow) trigger an update to a particular version, expose a `workflow_dispatch` input and forward it as `target-version`:
+
+```yaml
+name: Update Medusa to specific version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Target @medusajs/* version (e.g. 2.5.0)"
+        required: true
+
+jobs:
+  update:
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: medusajs/medusa-update-action@beta
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          target-version: ${{ inputs.version }}
+```
 
 ### Use a different AI agent
 

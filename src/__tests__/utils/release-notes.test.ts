@@ -27,15 +27,28 @@ beforeAll(async () => {
   fetchAndSaveReleaseNotes = m.fetchAndSaveReleaseNotes;
 });
 
-const VERSION = "2.5.0";
-const HTML_URL = `https://github.com/medusajs/medusa/releases/tag/v${VERSION}`;
+const CURRENT = "2.4.0";
+const TARGET = "2.5.0";
 
-function mockFetch(status: number, body: object | null) {
-  global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-  } as Response);
+function makeRelease(version: string, body = `notes for ${version}`) {
+  return {
+    tag_name: `v${version}`,
+    html_url: `https://github.com/medusajs/medusa/releases/tag/v${version}`,
+    body,
+  };
+}
+
+function mockPages(pages: object[][]) {
+  let call = 0;
+  global.fetch = jest.fn<typeof fetch>().mockImplementation(() => {
+    const body = pages[call] ?? [];
+    call++;
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(body),
+    } as Response);
+  });
 }
 
 beforeEach(() => {
@@ -43,67 +56,122 @@ beforeEach(() => {
 });
 
 describe("fetchAndSaveReleaseNotes", () => {
-  it("writes release notes body and sets outputs on success", async () => {
-    const body = "## What's Changed\n\n* fix: something cool";
-    mockFetch(200, { html_url: HTML_URL, body });
+  it("collects only the target release when one version behind", async () => {
+    mockPages([[makeRelease("2.5.0"), makeRelease("2.4.0"), makeRelease("2.3.0")]]);
 
-    await fetchAndSaveReleaseNotes(VERSION);
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
 
-    expect(mockWriteFileSync).toHaveBeenCalledWith("release-notes.md", body, "utf-8");
-    expect(mockSetOutput).toHaveBeenCalledWith("RELEASE_NOTES_URL", HTML_URL);
+    const written = mockWriteFileSync.mock.calls[0][1] as string;
+    expect(written).toContain("v2.5.0");
+    expect(written).not.toContain("v2.4.0");
+    expect(written).not.toContain("v2.3.0");
+  });
+
+  it("collects all releases between current and target across multiple pages", async () => {
+    mockPages([
+      [makeRelease("2.5.0"), makeRelease("2.4.9"), makeRelease("2.4.8"),
+       makeRelease("2.4.7"), makeRelease("2.4.6"), makeRelease("2.4.5"),
+       makeRelease("2.4.4"), makeRelease("2.4.3"), makeRelease("2.4.2"), makeRelease("2.4.1")],
+      [makeRelease("2.4.0"), makeRelease("2.3.9")],
+    ]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    const written = mockWriteFileSync.mock.calls[0][1] as string;
+    expect(written).toContain("v2.5.0");
+    expect(written).toContain("v2.4.1");
+    expect(written).not.toContain("v2.4.0");
+    expect(written).not.toContain("v2.3.9");
+  });
+
+  it("skips releases newer than target", async () => {
+    mockPages([[makeRelease("2.6.0"), makeRelease("2.5.0"), makeRelease("2.4.0")]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    const written = mockWriteFileSync.mock.calls[0][1] as string;
+    expect(written).not.toContain("v2.6.0");
+    expect(written).toContain("v2.5.0");
+  });
+
+  it("collects only the target when no currentVersion provided", async () => {
+    mockPages([[makeRelease("2.5.0"), makeRelease("2.4.9")]]);
+
+    await fetchAndSaveReleaseNotes("", TARGET);
+
+    const written = mockWriteFileSync.mock.calls[0][1] as string;
+    expect(written).toContain("v2.5.0");
+    expect(written).not.toContain("v2.4.9");
+  });
+
+  it("includes each release URL in the content", async () => {
+    mockPages([[makeRelease("2.5.0"), makeRelease("2.4.9"), makeRelease("2.4.0")]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    const written = mockWriteFileSync.mock.calls[0][1] as string;
+    expect(written).toContain("https://github.com/medusajs/medusa/releases/tag/v2.5.0");
+    expect(written).toContain("https://github.com/medusajs/medusa/releases/tag/v2.4.9");
+  });
+
+  it("sets RELEASE_NOTES_URL to the target release URL", async () => {
+    mockPages([[makeRelease("2.5.0"), makeRelease("2.4.0")]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    expect(mockSetOutput).toHaveBeenCalledWith(
+      "RELEASE_NOTES_URL",
+      "https://github.com/medusajs/medusa/releases/tag/v2.5.0"
+    );
+  });
+
+  it("detects breaking changes across any release", async () => {
+    mockPages([[
+      makeRelease("2.5.0", "Normal changes"),
+      makeRelease("2.4.9", "## Breaking Change: removed old API"),
+      makeRelease("2.4.0"),
+    ]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
+    expect(mockSetOutput).toHaveBeenCalledWith("HAS_BREAKING_CHANGES", "true");
+  });
+
+  it("sets HAS_BREAKING_CHANGES to false when no breaking changes", async () => {
+    mockPages([[makeRelease("2.5.0", "Just a fix"), makeRelease("2.4.0")]]);
+
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
+
     expect(mockSetOutput).toHaveBeenCalledWith("HAS_BREAKING_CHANGES", "false");
-  });
-
-  it("detects breaking changes in release body", async () => {
-    mockFetch(200, { html_url: HTML_URL, body: "## Breaking Changes\n\n* Renamed `createCart`" });
-
-    await fetchAndSaveReleaseNotes(VERSION);
-
-    expect(mockSetOutput).toHaveBeenCalledWith("HAS_BREAKING_CHANGES", "true");
-  });
-
-  it("detects breaking changes case-insensitively", async () => {
-    mockFetch(200, { html_url: HTML_URL, body: "### BREAKING CHANGE: old API removed" });
-
-    await fetchAndSaveReleaseNotes(VERSION);
-
-    expect(mockSetOutput).toHaveBeenCalledWith("HAS_BREAKING_CHANGES", "true");
-  });
-
-  it("writes fallback text when release body is empty", async () => {
-    mockFetch(200, { html_url: HTML_URL, body: "" });
-
-    await fetchAndSaveReleaseNotes(VERSION);
-
-    expect(mockWriteFileSync).toHaveBeenCalledWith("release-notes.md", "(No release notes found)", "utf-8");
   });
 
   it("warns and writes empty file on non-OK response", async () => {
-    mockFetch(404, null);
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: false, status: 403, json: () => Promise.resolve(null),
+    } as Response);
 
-    await fetchAndSaveReleaseNotes(VERSION);
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
 
-    expect(mockWarning).toHaveBeenCalledWith(expect.stringContaining("404"));
+    expect(mockWarning).toHaveBeenCalledWith(expect.stringContaining("403"));
     expect(mockWriteFileSync).toHaveBeenCalledWith("release-notes.md", "(No release notes found)", "utf-8");
-    expect(mockSetOutput).toHaveBeenCalledWith("RELEASE_NOTES_URL", `https://github.com/medusajs/medusa/releases/tag/v${VERSION}`);
-    expect(mockSetOutput).toHaveBeenCalledWith("HAS_BREAKING_CHANGES", "false");
+    expect(mockSetOutput).toHaveBeenCalledWith("RELEASE_NOTES_URL", `https://github.com/medusajs/medusa/releases/tag/v${TARGET}`);
   });
 
   it("handles fetch errors gracefully", async () => {
     global.fetch = jest.fn<typeof fetch>().mockRejectedValue(new Error("network error"));
 
-    await fetchAndSaveReleaseNotes(VERSION);
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
 
     expect(mockWarning).toHaveBeenCalledWith(expect.stringContaining("network error"));
     expect(mockWriteFileSync).toHaveBeenCalledWith("release-notes.md", "", "utf-8");
     expect(mockSetOutput).toHaveBeenCalledWith("HAS_BREAKING_CHANGES", "false");
   });
 
-  it("uses html_url from API response for RELEASE_NOTES_URL", async () => {
-    mockFetch(200, { html_url: HTML_URL, body: "some notes" });
+  it("writes fallback text when no releases found", async () => {
+    mockPages([[makeRelease("2.3.0")]]);  // target not in results
 
-    await fetchAndSaveReleaseNotes(VERSION);
+    await fetchAndSaveReleaseNotes(CURRENT, TARGET);
 
-    expect(mockSetOutput).toHaveBeenCalledWith("RELEASE_NOTES_URL", HTML_URL);
+    expect(mockWriteFileSync).toHaveBeenCalledWith("release-notes.md", "(No release notes found)", "utf-8");
   });
 });

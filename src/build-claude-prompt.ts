@@ -14,6 +14,7 @@ function readFile(filePath: string): string {
 
 export function buildClaudePrompt(params: {
   version: string;
+  previousVersion: string;
   releaseNotesUrl: string;
   buildExitCode: string;
   packageManager: string;
@@ -21,14 +22,19 @@ export function buildClaudePrompt(params: {
   releaseNotes: string;
   buildErrors: string;
 }): string {
-  const { version, releaseNotesUrl, buildExitCode, packageManager, buildScriptName, releaseNotes, buildErrors } = params;
+  const { version, previousVersion, releaseNotesUrl, buildExitCode, packageManager, buildScriptName, releaseNotes, buildErrors } = params;
+
+  const versionText =
+    previousVersion && previousVersion !== version
+      ? `from **v${previousVersion}** to **v${version}**`
+      : `to **v${version}**`;
 
   const buildErrorSection =
     buildExitCode !== "0" && buildErrors
       ? `The build failed after the update. Here are the errors:\n\n<build-errors>\n${buildErrors}\n</build-errors>\n`
       : "";
 
-  return `The \`@medusajs/*\` packages in this repository were just updated to **v${version}**.
+  return `The \`@medusajs/*\` packages in this repository were just updated ${versionText}.
 
 Release notes: ${releaseNotesUrl}
 
@@ -37,7 +43,7 @@ ${releaseNotes}
 </release-notes>
 
 ${buildErrorSection}**Your tasks:**
-1. Review the release notes above for any **breaking changes** in v${version}. If there are breaking changes, implement the necessary code changes to support the new version (e.g. updated import paths, renamed APIs, changed configuration options).
+1. Review the release notes above for any **breaking changes**. If there are breaking changes, implement the necessary code changes to support the new version (e.g. updated import paths, renamed APIs, changed configuration options).
 2. Fix any build errors listed above.
 3. **Do not change business logic.** Only make changes required by the Medusa version update.
 4. After making all changes, run the build to verify it succeeds: \`${packageManager} run ${buildScriptName}\`
@@ -46,6 +52,7 @@ ${buildErrorSection}**Your tasks:**
 
 function main(): void {
   const version = process.env.UPDATED_VERSION || "";
+  const previousVersion = process.env.PREVIOUS_VERSION || "";
   const releaseNotesUrl = process.env.RELEASE_NOTES_URL || "";
   const buildExitCode = process.env.BUILD_EXIT_CODE || "0";
   const packageManager = process.env.PACKAGE_MANAGER || "npm";
@@ -54,7 +61,7 @@ function main(): void {
   const releaseNotes = readFile(RELEASE_NOTES_FILE) || "No release notes available.";
   const buildErrors = readFile(BUILD_OUTPUT_FILE);
 
-  const prompt = buildClaudePrompt({ version, releaseNotesUrl, buildExitCode, packageManager, buildScriptName, releaseNotes, buildErrors });
+  const prompt = buildClaudePrompt({ version, previousVersion, releaseNotesUrl, buildExitCode, packageManager, buildScriptName, releaseNotes, buildErrors });
 
   core.setOutput("CLAUDE_PROMPT", prompt);
 }

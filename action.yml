@@ -36,6 +36,10 @@ inputs:
     description: "Environment variables to make available during the build step, one KEY=VALUE per line"
     required: false
     default: ""
+  target-version:
+    description: "Specific @medusajs/* version to update to (e.g. 2.5.0). Defaults to the latest available version."
+    required: false
+    default: ""
 
 outputs:
   pr-url:
@@ -79,6 +83,9 @@ runs:
       env:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
         APPS_DIRECTORY: ${{ inputs.apps-directory }}
+        BRANCH_PREFIX: ${{ inputs.branch-prefix }}
+        TARGET_VERSION: ${{ inputs.target-version }}
+        GH_TOKEN: ${{ inputs.create-pr != 'false' && inputs.github-token || '' }}
       run: npx tsx ${{ github.action_path }}/src/index.ts
 
     # ── Step 2: Build Claude prompt ──────────────────────────────────────
@@ -91,6 +98,7 @@ runs:
       shell: bash
       env:
         UPDATED_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}
+        PREVIOUS_VERSION: ${{ steps.setup.outputs.PREVIOUS_VERSION }}
         RELEASE_NOTES_URL: ${{ steps.setup.outputs.RELEASE_NOTES_URL }}
         BUILD_EXIT_CODE: ${{ steps.setup.outputs.BUILD_EXIT_CODE }}
         PACKAGE_MANAGER: ${{ steps.setup.outputs.PACKAGE_MANAGER }}
@@ -165,7 +173,8 @@ runs:
         UPDATED_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}
         BRANCH_PREFIX: ${{ inputs.branch-prefix }}
       run: |
-        BRANCH_NAME="${BRANCH_PREFIX}-${UPDATED_VERSION}-${{ github.run_id }}"
+        BRANCH_NAME="${BRANCH_PREFIX}-${UPDATED_VERSION}"
+        git push origin --delete "$BRANCH_NAME" 2>/dev/null || true
         git checkout -b "$BRANCH_NAME"
         git add -A
         git diff --staged --quiet || git commit -m "chore: update @medusajs/* to v${UPDATED_VERSION}"

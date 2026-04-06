@@ -60,21 +60,20 @@ describe("updatePackages", () => {
   it("returns noChanges=true when files were not modified by ncu", async () => {
     mockReadFileSync.mockReturnValue(pkgBefore);
 
-    const result = await updatePackages(ROOT, "yarn", [PKG_PATH]);
+    const result = await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0");
 
     expect(result.noChanges).toBe(true);
     expect(mockSetOutput).toHaveBeenCalledWith("NO_CHANGES", "true");
   });
 
-  it("returns updated version and noChanges=false when packages were bumped", async () => {
+  it("returns noChanges=false and sets UPDATED_VERSION output when packages were bumped", async () => {
     mockReadFileSync
-      .mockReturnValueOnce(pkgBefore)  // read before ncu
-      .mockReturnValue(pkgAfter);      // read after ncu + getMedusaVersion
+      .mockReturnValueOnce(pkgBefore)
+      .mockReturnValue(pkgAfter);
 
-    const result = await updatePackages(ROOT, "yarn", [PKG_PATH]);
+    const result = await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0");
 
     expect(result.noChanges).toBe(false);
-    expect(result.updatedVersion).toBe("2.5.0");
     expect(mockSetOutput).toHaveBeenCalledWith("UPDATED_VERSION", "2.5.0");
   });
 
@@ -83,7 +82,7 @@ describe("updatePackages", () => {
       .mockReturnValueOnce(pkgBefore)
       .mockReturnValue(pkgAfter);
 
-    await updatePackages(ROOT, "npm", [PKG_PATH]);
+    await updatePackages(ROOT, "npm", [PKG_PATH], "2.5.0");
 
     expect(mockSpawnSync).toHaveBeenCalledWith("npm", ["install"], expect.objectContaining({ cwd: ROOT }));
   });
@@ -93,7 +92,7 @@ describe("updatePackages", () => {
       .mockReturnValueOnce(pkgBefore)
       .mockReturnValue(pkgAfter);
 
-    await updatePackages(ROOT, "pnpm", [PKG_PATH]);
+    await updatePackages(ROOT, "pnpm", [PKG_PATH], "2.5.0");
 
     expect(mockSpawnSync).toHaveBeenCalledWith("pnpm", ["install", "--no-frozen-lockfile"], expect.objectContaining({ cwd: ROOT }));
   });
@@ -104,7 +103,7 @@ describe("updatePackages", () => {
       .mockReturnValue(pkgAfter);
     mockSpawnSync.mockReturnValue(makeSpawnResult(1));
 
-    await updatePackages(ROOT, "yarn", [PKG_PATH]);
+    await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0");
 
     expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining("install failed"));
   });
@@ -112,14 +111,62 @@ describe("updatePackages", () => {
   it("processes multiple package.json paths", async () => {
     const pkgPath2 = `${ROOT}/apps/storefront/package.json`;
     mockReadFileSync
-      .mockReturnValueOnce(pkgBefore).mockReturnValueOnce(pkgAfter)  // pkg1 before/after
-      .mockReturnValueOnce(pkgBefore).mockReturnValueOnce(pkgAfter)  // pkg2 before/after
-      .mockReturnValue(pkgAfter);                                     // getMedusaVersion reads
+      .mockReturnValueOnce(pkgBefore).mockReturnValueOnce(pkgAfter)
+      .mockReturnValueOnce(pkgBefore).mockReturnValueOnce(pkgAfter);
 
-    const result = await updatePackages(ROOT, "yarn", [PKG_PATH, pkgPath2]);
+    const result = await updatePackages(ROOT, "yarn", [PKG_PATH, pkgPath2], "2.5.0");
 
     expect(mockNcuRun).toHaveBeenCalledTimes(2);
     expect(result.noChanges).toBe(false);
+  });
+
+  describe("pinExact mode", () => {
+    it("directly rewrites package.json without calling ncu", async () => {
+      const mockWriteFileSync = jest.fn();
+      const { writeFileSync } = await import("fs");
+      (writeFileSync as jest.Mock).mockImplementation(mockWriteFileSync);
+
+      mockReadFileSync.mockReturnValue(pkgBefore);
+
+      await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0", true);
+
+      expect(mockNcuRun).not.toHaveBeenCalled();
+    });
+
+    it("preserves range prefix (^) when pinning", async () => {
+      const pkgWithCaret = JSON.stringify({ dependencies: { "@medusajs/medusa": "^2.4.0" } }, null, 2) + "\n";
+      mockReadFileSync.mockReturnValue(pkgWithCaret);
+
+      const { writeFileSync } = await import("fs");
+      let written = "";
+      (writeFileSync as jest.Mock).mockImplementation((_p: unknown, content: unknown) => {
+        written = content as string;
+      });
+
+      await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0", true);
+
+      const parsed = JSON.parse(written);
+      expect(parsed.dependencies["@medusajs/medusa"]).toBe("^2.5.0");
+    });
+
+    it("does not modify @medusajs/ui when pinning", async () => {
+      const pkgWithUi = JSON.stringify({
+        dependencies: { "@medusajs/medusa": "^2.4.0", "@medusajs/ui": "^3.0.0" },
+      }, null, 2) + "\n";
+      mockReadFileSync.mockReturnValue(pkgWithUi);
+
+      const { writeFileSync } = await import("fs");
+      let written = "";
+      (writeFileSync as jest.Mock).mockImplementation((_p: unknown, content: unknown) => {
+        written = content as string;
+      });
+
+      await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0", true);
+
+      const parsed = JSON.parse(written);
+      expect(parsed.dependencies["@medusajs/ui"]).toBe("^3.0.0");
+      expect(parsed.dependencies["@medusajs/medusa"]).toBe("^2.5.0");
+    });
   });
 
   describe("yarn berry install", () => {
@@ -129,7 +176,7 @@ describe("updatePackages", () => {
         .mockReturnValue(pkgAfter);
       mockExistsSync.mockImplementation((p) => p === `${ROOT}/.yarnrc.yml`);
 
-      await updatePackages(ROOT, "yarn", [PKG_PATH]);
+      await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0");
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         "yarn",
@@ -144,7 +191,7 @@ describe("updatePackages", () => {
         .mockReturnValue(pkgAfter);
       mockExistsSync.mockReturnValue(false);
 
-      await updatePackages(ROOT, "yarn", [PKG_PATH]);
+      await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0");
 
       expect(mockSpawnSync).toHaveBeenCalledWith(
         "yarn",
@@ -152,16 +199,5 @@ describe("updatePackages", () => {
         expect.objectContaining({ cwd: ROOT })
       );
     });
-  });
-
-  it("returns empty updatedVersion when only @medusajs/ui is present", async () => {
-    const pkgUiOnly = JSON.stringify({ dependencies: { "@medusajs/ui": "^3.0.0" } });
-    mockReadFileSync
-      .mockReturnValueOnce(pkgBefore)  // before ncu (different content → triggers changed)
-      .mockReturnValue(pkgUiOnly);     // after ncu + getMedusaVersion reads (ui only → skipped)
-
-    const result = await updatePackages(ROOT, "yarn", [PKG_PATH]);
-
-    expect(result.updatedVersion).toBe("");
   });
 });

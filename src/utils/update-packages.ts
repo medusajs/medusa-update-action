@@ -4,31 +4,34 @@ import { spawnSync } from "child_process";
 import * as core from "@actions/core";
 import { run as ncuRun } from "npm-check-updates";
 
-function getMedusaVersion(pkgJsonPath: string): string | null {
-  try {
-    const content = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
-    const depFields = ["dependencies", "devDependencies", "peerDependencies"];
-    for (const field of depFields) {
-      const deps = content[field] as Record<string, string> | undefined;
-      if (deps) {
-        for (const [key, value] of Object.entries(deps)) {
-          if (key.startsWith("@medusajs/") && key !== "@medusajs/ui") {
-            // Strip leading ^ ~ or other range specifiers
-            return value.replace(/^[^0-9]*/, "");
-          }
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-async function updatePackageJson(pkgJsonPath: string): Promise<boolean> {
+/**
+ * @param pinVersion When provided, rewrites `@medusajs/*` versions directly to
+ * this value (preserving any `^`/`~` prefix) instead of running ncu.
+ * When omitted, ncu resolves and applies the latest available version.
+ */
+async function updatePackageJson(pkgJsonPath: string, pinVersion?: string): Promise<boolean> {
   core.info(`\nUpdating @medusajs/* in: ${pkgJsonPath}`);
 
   const beforeContent = fs.readFileSync(pkgJsonPath, "utf-8");
+
+  if (pinVersion) {
+    const pkgData = JSON.parse(beforeContent);
+    for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
+      const deps = pkgData[field] as Record<string, string> | undefined;
+      if (!deps) continue;
+      for (const pkg of Object.keys(deps)) {
+        if (pkg.startsWith("@medusajs/") && pkg !== "@medusajs/ui") {
+          const prefix = /^[\^~]/.test(deps[pkg]) ? deps[pkg][0] : "";
+          deps[pkg] = `${prefix}${pinVersion}`;
+        }
+      }
+    }
+    const newContent = JSON.stringify(pkgData, null, 2) + "\n";
+    fs.writeFileSync(pkgJsonPath, newContent, "utf-8");
+    const changed = newContent !== beforeContent;
+    core.info(changed ? "  -> Updated." : "  -> No changes.");
+    return changed;
+  }
 
   await ncuRun({
     packageFile: pkgJsonPath,
@@ -73,13 +76,20 @@ function runInstall(rootDir: string, packageManager: string): void {
 export async function updatePackages(
   rootDir: string,
   packageManager: string,
-  pkgJsonPaths: string[]
-): Promise<{ noChanges: boolean; updatedVersion: string }> {
+  pkgJsonPaths: string[],
+  targetVersion: string,
+  /**
+   * When `true`, rewrites `@medusajs/*` versions directly to `targetVersion`
+   * (preserving any `^`/`~` prefix) instead of letting ncu resolve the latest.
+   * Use this when the caller has already validated a specific version to pin to.
+   */
+  pinExact = false
+): Promise<{ noChanges: boolean }> {
   core.info(`Updating @medusajs/* packages in ${pkgJsonPaths.length} package.json file(s)...`);
 
   let anyChanged = false;
   for (const pkgPath of pkgJsonPaths) {
-    const changed = await updatePackageJson(pkgPath);
+    const changed = await updatePackageJson(pkgPath, pinExact ? targetVersion : undefined);
     if (changed) {
       anyChanged = true;
     }
@@ -89,25 +99,15 @@ export async function updatePackages(
     core.info("\nNo @medusajs/* packages were updated. Already at latest.");
     core.setOutput("NO_CHANGES", "true");
     core.setOutput("UPDATED_VERSION", "");
-    return { noChanges: true, updatedVersion: "" };
+    return { noChanges: true };
   }
 
-  // Read the new version from the first changed file
-  let updatedVersion = "";
-  for (const pkgPath of pkgJsonPaths) {
-    const v = getMedusaVersion(pkgPath);
-    if (v) {
-      updatedVersion = v;
-      break;
-    }
-  }
-
-  core.info(`\nUpdated to version: ${updatedVersion}`);
+  core.info(`\nUpdated to version: ${targetVersion}`);
 
   runInstall(rootDir, packageManager);
 
   core.setOutput("NO_CHANGES", "false");
-  core.setOutput("UPDATED_VERSION", updatedVersion);
+  core.setOutput("UPDATED_VERSION", targetVersion);
 
-  return { noChanges: false, updatedVersion };
+  return { noChanges: false };
 }
