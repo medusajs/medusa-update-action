@@ -93,8 +93,7 @@ runs:
       id: claude-prompt
       if: |
         steps.setup.outputs.NO_CHANGES != 'true' &&
-        inputs.anthropic-api-key != '' &&
-        (steps.setup.outputs.BUILD_EXIT_CODE != '0' || steps.setup.outputs.HAS_BREAKING_CHANGES == 'true')
+        inputs.anthropic-api-key != ''
       shell: bash
       env:
         UPDATED_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}

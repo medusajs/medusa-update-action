@@ -168,7 +168,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-When Claude Code is enabled, if the build fails after the update **or** breaking changes are detected in the release notes, Claude will:
+When Claude Code is enabled, it always runs after the update so no breaking changes are missed — even when they aren't explicitly labeled as such in the release notes. Claude will:
 
 1. Read the release notes to understand what changed
 2. Implement any required code changes (updated imports, renamed APIs, changed config, etc.)
