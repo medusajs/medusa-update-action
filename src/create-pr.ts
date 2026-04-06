@@ -21,7 +21,8 @@ function truncate(text: string, maxLength: number): string {
 function closeStaleUpdatePRs(branchPrefix: string): void {
   core.info(`Closing stale PRs with head branch matching "${branchPrefix}-*"...`);
   try {
-    const semverPattern = `${branchPrefix}-[0-9]+\\.[0-9]+\\.[0-9]+`;
+    // jq uses JSON string syntax: \\ produces a literal backslash in the regex (i.e. \.)
+    const semverPattern = `${branchPrefix}-[0-9]+\\\\.[0-9]+\\\\.[0-9]+`;
     const output = execSync(
       `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("^${semverPattern}$")) | .number'`,
       { encoding: "utf-8" }
@@ -76,9 +77,21 @@ ${truncatedOutput}
 </details>`;
   }
 
-  const notesSummary = releaseNotesBody
-    ? truncate(releaseNotesBody, 2000)
-    : "_Release notes could not be fetched._";
+  let releaseNotesSection = "";
+  if (!releaseNotesBody) {
+    releaseNotesSection = "_Release notes could not be fetched._";
+  } else {
+    const SEPARATOR = "\n\n---\n\n";
+    const sections = releaseNotesBody.split(SEPARATOR);
+    const latestNotes = truncate(sections[0], 2000);
+    const previousSections = sections.slice(1);
+
+    releaseNotesSection = latestNotes;
+    if (previousSections.length > 0) {
+      const previousContent = previousSections.join(SEPARATOR);
+      releaseNotesSection += `\n\n<details>\n<summary>${previousSections.length} previous release(s)</summary>\n\n${previousContent}\n\n</details>`;
+    }
+  }
 
   return `## Update \`@medusajs/*\` to v${version}
 
@@ -97,9 +110,9 @@ ${buildSection}
 
 ---
 
-## Release Notes Summary
+## Release Notes
 
-${notesSummary}
+${releaseNotesSection}
 
 [View full release notes →](${releaseNotesUrl})
 
