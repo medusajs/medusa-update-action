@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@actions/core": "^3.0.0",
+    "@medusajs/telemetry": "^2.13.5",
     "npm-check-updates": "^17.1.14"
   },
   "devDependencies": {

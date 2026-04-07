@@ -181,7 +181,7 @@ describe("fetchAndSaveReleaseNotes", () => {
 
     await fetchAndSaveReleaseNotes(CURRENT, TARGET);
 
-    const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+    const fetchCall = (global.fetch as jest.Mock).mock.calls[0] as [string, { headers: Record<string, string> }];
     expect(fetchCall[1].headers["Authorization"]).toBe("Bearer test-token");
     delete process.env.GH_TOKEN;
   });
@@ -192,7 +192,7 @@ describe("fetchAndSaveReleaseNotes", () => {
 
     await fetchAndSaveReleaseNotes(CURRENT, TARGET);
 
-    const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+    const fetchCall = (global.fetch as jest.Mock).mock.calls[0] as [string, { headers: Record<string, string> }];
     expect(fetchCall[1].headers["Authorization"]).toBeUndefined();
   });
 });

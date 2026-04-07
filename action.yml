@@ -204,3 +204,22 @@ runs:
         CLAUDE_CONFIGURED: ${{ inputs.anthropic-api-key != '' && 'true' || 'false' }}
         UPDATE_BRANCH: ${{ steps.commit.outputs.UPDATE_BRANCH }}
       run: npx tsx ${{ github.action_path }}/src/create-pr.ts
+
+    # ── Step 8: Report telemetry ─────────────────────────────────────────
+    - name: Report telemetry
+      if: always() && steps.setup.outputs.PACKAGE_MANAGER != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        PACKAGE_MANAGER: ${{ steps.setup.outputs.PACKAGE_MANAGER }}
+        IS_MONOREPO: ${{ steps.setup.outputs.IS_MONOREPO }}
+        HAS_ANTHROPIC_KEY: ${{ inputs.anthropic-api-key != '' && 'true' || 'false' }}
+        CREATE_PR: ${{ inputs.create-pr }}
+        HAS_TARGET_VERSION: ${{ inputs.target-version != '' && 'true' || 'false' }}
+        CURRENT_VERSION: ${{ steps.setup.outputs.PREVIOUS_VERSION }}
+        TARGET_VERSION: ${{ steps.setup.outputs.UPDATED_VERSION }}
+        NO_CHANGES: ${{ steps.setup.outputs.NO_CHANGES }}
+        BUILD_STATUS: ${{ steps.set-build-status.outputs.STATUS }}
+        PR_URL: ${{ steps.create-pr.outputs.PR_URL }}
+        ACTION_FAILED: ${{ job.status == 'failure' && 'true' || 'false' }}
+      run: npx tsx ${{ github.action_path }}/src/report-telemetry.ts
