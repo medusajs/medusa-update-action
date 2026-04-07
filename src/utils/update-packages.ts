@@ -38,6 +38,7 @@ async function updatePackageJson(pkgJsonPath: string, pinVersion?: string): Prom
     filter: /^@medusajs\//,
     upgrade: true,
     target: "latest",
+    dep: ["prod", "dev", "peer"],
   });
 
   const afterContent = fs.readFileSync(pkgJsonPath, "utf-8");
