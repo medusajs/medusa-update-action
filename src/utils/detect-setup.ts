@@ -17,40 +17,47 @@ function hasMedusaDeps(pkgJson: Record<string, unknown>): boolean {
   return false;
 }
 
+function hasMedusaDepsAtPath(pkgPath: string): boolean {
+  if (!fs.existsSync(pkgPath)) return false;
+  try {
+    return hasMedusaDeps(JSON.parse(fs.readFileSync(pkgPath, "utf-8")));
+  } catch {
+    return false;
+  }
+}
+
 function findMedusaPackageJsonFiles(
   rootDir: string,
   isMonorepo: boolean,
   appsDirectory: string
 ): string[] {
-  if (!isMonorepo) {
-    const rootPkg = path.join(rootDir, "package.json");
-    if (fs.existsSync(rootPkg) && hasMedusaDeps(JSON.parse(fs.readFileSync(rootPkg, "utf-8")))) {
-      return [rootPkg];
-    }
-    return [];
-  }
+  const rootPkg = path.join(rootDir, "package.json");
 
-  const appsDir = path.join(rootDir, appsDirectory);
-  if (!fs.existsSync(appsDir)) {
-    core.warning(`Apps directory "${appsDirectory}" not found under ${rootDir}.`);
-    return [];
+  if (!isMonorepo) {
+    return hasMedusaDepsAtPath(rootPkg) ? [rootPkg] : [];
   }
 
   const results: string[] = [];
-  const entries = fs.readdirSync(appsDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const pkgPath = path.join(appsDir, entry.name, "package.json");
-    if (!fs.existsSync(pkgPath)) continue;
-    try {
-      const content = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-      if (hasMedusaDeps(content)) {
+
+  const appsDir = path.join(rootDir, appsDirectory);
+  if (fs.existsSync(appsDir)) {
+    const entries = fs.readdirSync(appsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const pkgPath = path.join(appsDir, entry.name, "package.json");
+      if (hasMedusaDepsAtPath(pkgPath)) {
         results.push(pkgPath);
       }
-    } catch {
-      // skip malformed package.json
     }
+  } else {
+    core.warning(`Apps directory "${appsDirectory}" not found under ${rootDir}.`);
   }
+
+  // The monorepo root can hold @medusajs/* dev tooling (e.g. @medusajs/eslint-plugin)
+  if (hasMedusaDepsAtPath(rootPkg)) {
+    results.push(rootPkg);
+  }
+
   return results;
 }
 

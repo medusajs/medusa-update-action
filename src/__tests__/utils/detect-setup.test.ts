@@ -126,6 +126,47 @@ describe("detectSetup", () => {
       expect(detectSetup(ROOT, "packages")?.medusaPkgPaths).toContain(`${ROOT}/packages/backend/package.json`);
     });
 
+    it("includes the monorepo root package.json when it has @medusajs/* dev tooling", () => {
+      mockExistsSync.mockImplementation((p) =>
+        [`${ROOT}/pnpm-workspace.yaml`, `${ROOT}/package.json`, `${ROOT}/apps`, `${ROOT}/apps/backend/package.json`].includes(p as string)
+      );
+      mockReaddirSync.mockReturnValue([{ name: "backend", isDirectory: () => true } as unknown as import("fs").Dirent]);
+      mockReadFileSync.mockImplementation((p) =>
+        p === `${ROOT}/package.json`
+          ? JSON.stringify({ devDependencies: { "@medusajs/eslint-plugin": "^2.20.0" } })
+          : pkgWithMedusa
+      );
+
+      expect(detectSetup(ROOT, "apps")?.medusaPkgPaths).toEqual([
+        `${ROOT}/apps/backend/package.json`,
+        `${ROOT}/package.json`,
+      ]);
+    });
+
+    it("excludes the monorepo root package.json when it has no medusa deps", () => {
+      mockExistsSync.mockImplementation((p) =>
+        [`${ROOT}/pnpm-workspace.yaml`, `${ROOT}/package.json`, `${ROOT}/apps`, `${ROOT}/apps/backend/package.json`].includes(p as string)
+      );
+      mockReaddirSync.mockReturnValue([{ name: "backend", isDirectory: () => true } as unknown as import("fs").Dirent]);
+      mockReadFileSync.mockImplementation((p) =>
+        p === `${ROOT}/package.json` ? JSON.stringify({ workspaces: ["apps/*"] }) : pkgWithMedusa
+      );
+
+      expect(detectSetup(ROOT, "apps")?.medusaPkgPaths).toEqual([`${ROOT}/apps/backend/package.json`]);
+    });
+
+    it("falls back to the root package.json when the apps directory does not exist", () => {
+      mockExistsSync.mockImplementation((p) =>
+        [`${ROOT}/pnpm-workspace.yaml`, `${ROOT}/package.json`].includes(p as string)
+      );
+      mockReadFileSync.mockReturnValue(
+        JSON.stringify({ devDependencies: { "@medusajs/eslint-plugin": "^2.20.0" } })
+      );
+
+      expect(detectSetup(ROOT, "apps")?.medusaPkgPaths).toEqual([`${ROOT}/package.json`]);
+      expect(mockWarning).toHaveBeenCalledWith(expect.stringContaining("not found"));
+    });
+
     it("calls setFailed and returns null when apps directory does not exist", () => {
       mockExistsSync.mockImplementation((p) => p === `${ROOT}/pnpm-workspace.yaml`);
 

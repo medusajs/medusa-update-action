@@ -45,6 +45,7 @@ A GitHub Action (reusable workflow) that automatically keeps your `@medusajs/*` 
 - Detects your package manager automatically (npm, yarn, pnpm)
 - Works with **standalone** Medusa backends, **monorepos**, and **plugins**
 - Updates only `@medusajs/*` packages — leaves your other dependencies untouched
+- In monorepos, also updates root-level `@medusajs/*` dev tooling such as `@medusajs/eslint-plugin`
 - Runs your `build` script to verify nothing is broken
 - Includes a link to the official release notes in every PR
 - If build errors occur **without** a Claude API key → errors are included in the PR body so you can fix them manually
