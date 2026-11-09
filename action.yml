@@ -40,6 +40,14 @@ inputs:
     description: "Specific @medusajs/* version to update to (e.g. 2.5.0). Defaults to the latest available version."
     required: false
     default: ""
+  install-retries:
+    description: "Number of times to retry the package install if it fails, e.g. when a just-published release hasn't propagated yet or is blocked by a package manager's minimum release age"
+    required: false
+    default: "5"
+  install-retry-delay:
+    description: "Seconds to wait between install retries"
+    required: false
+    default: "60"
 
 outputs:
   pr-url:
@@ -85,6 +93,8 @@ runs:
         APPS_DIRECTORY: ${{ inputs.apps-directory }}
         BRANCH_PREFIX: ${{ inputs.branch-prefix }}
         TARGET_VERSION: ${{ inputs.target-version }}
+        INSTALL_RETRIES: ${{ inputs.install-retries }}
+        INSTALL_RETRY_DELAY: ${{ inputs.install-retry-delay }}
         GH_TOKEN: ${{ inputs.create-pr != 'false' && inputs.github-token || '' }}
       run: ${{ github.action_path }}/node_modules/.bin/tsx ${{ github.action_path }}/src/index.ts
 

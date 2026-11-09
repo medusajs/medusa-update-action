@@ -61,7 +61,18 @@ async function main(): Promise<void> {
   }
 
   // Step 4: Update @medusajs/* packages (modifies files + runs install)
-  const { noChanges } = await updatePackages(rootDir, packageManager, medusaPkgPaths, targetVersion, !!specifiedVersion);
+  const installRetry = {
+    retries: Math.max(0, parseInt(process.env.INSTALL_RETRIES || "0", 10) || 0),
+    delayMs: Math.max(0, parseInt(process.env.INSTALL_RETRY_DELAY || "0", 10) || 0) * 1000,
+  };
+  const { noChanges } = await updatePackages(
+    rootDir,
+    packageManager,
+    medusaPkgPaths,
+    targetVersion,
+    !!specifiedVersion,
+    installRetry
+  );
   if (noChanges) return;
 
   // Step 5: Fetch release notes for all versions between current and target

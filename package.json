@@ -13,7 +13,8 @@
     "@actions/core": "^3.0.0",
     "@medusajs/telemetry": "^2.13.5",
     "npm-check-updates": "^17.1.14",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/jest": "^29",

@@ -3,6 +3,9 @@ import * as path from "path";
 import { spawnSync } from "child_process";
 import * as core from "@actions/core";
 import { run as ncuRun } from "npm-check-updates";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+
+const MEDUSA_PACKAGE_PATTERN = "@medusajs/*";
 
 /**
  * @param pinVersion When provided, rewrites `@medusajs/*` versions directly to
@@ -47,7 +50,49 @@ async function updatePackageJson(pkgJsonPath: string, pinVersion?: string): Prom
   return changed;
 }
 
-function runInstall(rootDir: string, packageManager: string): void {
+export interface InstallRetryOptions {
+  retries: number;
+  delayMs: number;
+}
+
+/**
+ * Temporarily exempts `@medusajs/*` from the package manager's minimum release
+ * age (pnpm `minimumReleaseAgeExclude`, Yarn Berry `npmPreapprovedPackages`) so a
+ * just-published release can be installed. Returns a function that restores the file.
+ */
+function excludeMedusaFromReleaseAge(rootDir: string, packageManager: string): () => void {
+  let configPath: string;
+  let key: string;
+  if (packageManager === "pnpm") {
+    configPath = path.join(rootDir, "pnpm-workspace.yaml");
+    key = "minimumReleaseAgeExclude";
+  } else if (packageManager === "yarn") {
+    configPath = path.join(rootDir, ".yarnrc.yml");
+    key = "npmPreapprovedPackages";
+  } else {
+    return () => {};
+  }
+
+  if (!fs.existsSync(configPath)) return () => {};
+
+  const original = fs.readFileSync(configPath, "utf-8");
+  // Yarn errors on unknown settings, so only add the key on versions that use the age gate.
+  if (packageManager === "yarn" && !original.includes("npmMinimalAgeGate")) return () => {};
+
+  const config = (parseYaml(original) as Record<string, unknown> | null) ?? {};
+  const list = Array.isArray(config[key]) ? (config[key] as string[]) : [];
+  if (list.includes(MEDUSA_PACKAGE_PATTERN)) return () => {};
+
+  config[key] = [...list, MEDUSA_PACKAGE_PATTERN];
+  fs.writeFileSync(configPath, stringifyYaml(config), "utf-8");
+  core.info(`Temporarily added ${MEDUSA_PACKAGE_PATTERN} to ${key} in ${path.basename(configPath)}`);
+
+  return () => fs.writeFileSync(configPath, original, "utf-8");
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function runInstall(rootDir: string, packageManager: string, retry: InstallRetryOptions): Promise<void> {
   const args = ["install"];
 
   if (packageManager === "yarn") {
@@ -63,14 +108,41 @@ function runInstall(rootDir: string, packageManager: string): void {
     args.push("--no-frozen-lockfile");
   }
 
-  core.info(`\nRunning ${packageManager} install in: ${rootDir}`);
-  const result = spawnSync(packageManager, args, {
-    cwd: rootDir,
-    stdio: "inherit",
-    shell: true,
-  });
-  if (result.status !== 0) {
-    core.setFailed(`${packageManager} install failed with exit code ${result.status}`);
+  const restoreConfig = excludeMedusaFromReleaseAge(rootDir, packageManager);
+  try {
+    await installWithRetry(rootDir, packageManager, args, retry);
+  } finally {
+    restoreConfig();
+  }
+}
+
+async function installWithRetry(
+  rootDir: string,
+  packageManager: string,
+  args: string[],
+  retry: InstallRetryOptions
+): Promise<void> {
+  const maxAttempts = retry.retries + 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    core.info(`\nRunning ${packageManager} install in: ${rootDir} (attempt ${attempt}/${maxAttempts})`);
+    const result = spawnSync(packageManager, args, {
+      cwd: rootDir,
+      stdio: "inherit",
+      shell: true,
+    });
+    if (result.status === 0) return;
+
+    if (attempt === maxAttempts) {
+      core.setFailed(`${packageManager} install failed with exit code ${result.status} after ${maxAttempts} attempt(s)`);
+      return;
+    }
+
+    // Right after a release, not every @medusajs/* package may have propagated
+    // to the registry yet, so wait for the cooldown to pass.
+    core.warning(
+      `${packageManager} install failed with exit code ${result.status}. Retrying in ${retry.delayMs / 1000}s...`
+    );
+    await sleep(retry.delayMs);
   }
 }
 
@@ -84,7 +156,8 @@ export async function updatePackages(
    * (preserving any `^`/`~` prefix) instead of letting ncu resolve the latest.
    * Use this when the caller has already validated a specific version to pin to.
    */
-  pinExact = false
+  pinExact = false,
+  installRetry: InstallRetryOptions = { retries: 0, delayMs: 0 }
 ): Promise<{ noChanges: boolean }> {
   core.info(`Updating @medusajs/* packages in ${pkgJsonPaths.length} package.json file(s)...`);
 
@@ -105,7 +178,7 @@ export async function updatePackages(
 
   core.info(`\nUpdated to version: ${targetVersion}`);
 
-  runInstall(rootDir, packageManager);
+  await runInstall(rootDir, packageManager, installRetry);
 
   core.setOutput("NO_CHANGES", "false");
   core.setOutput("UPDATED_VERSION", targetVersion);

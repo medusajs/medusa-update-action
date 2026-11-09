@@ -227,6 +227,8 @@ jobs:
 | `apps-directory` | string | no | `apps` | Subdirectory containing workspace apps (monorepos only) |
 | `create-pr` | string | no | `true` | Set to `"false"` to skip committing and opening a PR |
 | `target-version` | string | no | _(latest)_ | Pin to a specific `@medusajs/*` version (e.g. `2.5.0`). Must be greater than the currently installed version. Defaults to the latest available version. |
+| `install-retries` | string | no | `5` | How many times to retry the package install when it fails. Useful when the action runs right after a Medusa release, before every package is installable. `@medusajs/*` is also exempted from pnpm's `minimumReleaseAge` and Yarn's `npmMinimalAgeGate` during the install (the config file is restored afterwards). |
+| `install-retry-delay` | string | no | `60` | Seconds to wait between install retries. |
 
 ## Secrets
 

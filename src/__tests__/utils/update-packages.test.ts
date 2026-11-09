@@ -108,6 +108,33 @@ describe("updatePackages", () => {
     expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining("install failed"));
   });
 
+  it("retries install until it succeeds", async () => {
+    mockReadFileSync
+      .mockReturnValueOnce(pkgBefore)
+      .mockReturnValue(pkgAfter);
+    mockSpawnSync
+      .mockReturnValueOnce(makeSpawnResult(1))
+      .mockReturnValueOnce(makeSpawnResult(1))
+      .mockReturnValue(makeSpawnResult(0));
+
+    await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0", false, { retries: 3, delayMs: 0 });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(3);
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  it("calls setFailed when install fails after all retries", async () => {
+    mockReadFileSync
+      .mockReturnValueOnce(pkgBefore)
+      .mockReturnValue(pkgAfter);
+    mockSpawnSync.mockReturnValue(makeSpawnResult(1));
+
+    await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0", false, { retries: 2, delayMs: 0 });
+
+    expect(mockSpawnSync).toHaveBeenCalledTimes(3);
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining("after 3 attempt(s)"));
+  });
+
   it("processes multiple package.json paths", async () => {
     const pkgPath2 = `${ROOT}/apps/storefront/package.json`;
     mockReadFileSync
@@ -166,6 +193,85 @@ describe("updatePackages", () => {
       const parsed = JSON.parse(written);
       expect(parsed.dependencies["@medusajs/ui"]).toBe("^3.0.0");
       expect(parsed.dependencies["@medusajs/medusa"]).toBe("^2.5.0");
+    });
+  });
+
+  describe("minimum release age exclusion", () => {
+    function captureWrites() {
+      const writes: Record<string, string[]> = {};
+      return import("fs").then(({ writeFileSync }) => {
+        (writeFileSync as jest.Mock).mockImplementation((p: unknown, content: unknown) => {
+          (writes[p as string] ??= []).push(content as string);
+        });
+        return writes;
+      });
+    }
+
+    it.each([
+      ["pnpm", "pnpm-workspace.yaml", "minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - react\n", "minimumReleaseAgeExclude"],
+      ["yarn", ".yarnrc.yml", "npmMinimalAgeGate: 1d\n", "npmPreapprovedPackages"],
+    ])("adds @medusajs/* for %s during install and restores the file", async (pm, file, original, key) => {
+      const configPath = `${ROOT}/${file}`;
+      mockExistsSync.mockImplementation((p) => p === configPath);
+      mockReadFileSync.mockImplementation(((p: string) => {
+        if (p === configPath) return original;
+        return mockReadFileSync.mock.calls.length <= 1 ? pkgBefore : pkgAfter;
+      }) as never);
+      const writes = await captureWrites();
+      let configDuringInstall = "";
+      mockSpawnSync.mockImplementation((() => {
+        configDuringInstall = writes[configPath]?.at(-1) ?? "";
+        return makeSpawnResult(0);
+      }) as never);
+
+      await updatePackages(ROOT, pm, [PKG_PATH], "2.5.0");
+
+      expect(configDuringInstall).toContain(key);
+      expect(configDuringInstall).toContain("@medusajs/*");
+      expect(writes[configPath].at(-1)).toBe(original);
+    });
+
+    it("restores the config file even when install fails", async () => {
+      const configPath = `${ROOT}/pnpm-workspace.yaml`;
+      const original = "minimumReleaseAge: 1440\n";
+      mockExistsSync.mockImplementation((p) => p === configPath);
+      mockReadFileSync.mockImplementation(((p: string) => {
+        if (p === configPath) return original;
+        return mockReadFileSync.mock.calls.length <= 1 ? pkgBefore : pkgAfter;
+      }) as never);
+      const writes = await captureWrites();
+      mockSpawnSync.mockReturnValue(makeSpawnResult(1));
+
+      await updatePackages(ROOT, "pnpm", [PKG_PATH], "2.5.0");
+
+      expect(mockSetFailed).toHaveBeenCalled();
+      expect(writes[configPath].at(-1)).toBe(original);
+    });
+
+    it("does not touch .yarnrc.yml when no age gate is configured", async () => {
+      const configPath = `${ROOT}/.yarnrc.yml`;
+      mockExistsSync.mockImplementation((p) => p === configPath);
+      mockReadFileSync.mockImplementation(((p: string) => {
+        if (p === configPath) return "nodeLinker: node-modules\n";
+        return mockReadFileSync.mock.calls.length <= 1 ? pkgBefore : pkgAfter;
+      }) as never);
+      const writes = await captureWrites();
+
+      await updatePackages(ROOT, "yarn", [PKG_PATH], "2.5.0");
+
+      expect(writes[configPath]).toBeUndefined();
+    });
+
+    it("does not touch config for npm", async () => {
+      mockReadFileSync
+        .mockReturnValueOnce(pkgBefore)
+        .mockReturnValue(pkgAfter);
+      mockExistsSync.mockReturnValue(true);
+      const writes = await captureWrites();
+
+      await updatePackages(ROOT, "npm", [PKG_PATH], "2.5.0");
+
+      expect(Object.keys(writes)).toHaveLength(0);
     });
   });
 
